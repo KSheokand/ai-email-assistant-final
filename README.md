@@ -1,3 +1,6 @@
+---
+
+````md
 # AI Email Assistant
 
 An AI-powered Gmail assistant that lets you:
@@ -57,10 +60,11 @@ This project is split into:
     │   └── dashboard/page.tsx
     ├── package.json
     └── .env.local           (you create)
+````
 
 ---
 
-## Prerequisites
+## ✅ Prerequisites
 
 * Node.js (LTS)
 * Python 3.12+ (3.13 also works)
@@ -339,6 +343,13 @@ Production login flow is then:
   * Card button “🗑 Delete”, or:
     `Delete email 3` → confirm with `yes`.
 
+---
+
+## 📝 License
+
+Add your license info here (MIT, Apache 2.0, etc.).
+
+---
 
 ## 🙋‍♂️ Notes
 
