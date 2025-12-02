@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+body {
+  @apply antialiased;
+}
+
+/* simple nice scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 9999px;
+}
