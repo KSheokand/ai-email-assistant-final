@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 import base64
 import email as py_email
 
-from ..auth_utils import refresh_credentials_if_needed
+from ..auth_utils import refresh_credentials_if_needed, get_session_token
 from ..ai_service import summarize_text, generate_reply_for_email
 
 router = APIRouter()
@@ -61,8 +61,8 @@ def last5(request: Request):
     Fetch and summarize the last 5 Gmail messages.
     If OpenAI quota is exceeded, summaries will say so but emails will still appear.
     """
-    session = request.cookies.get("session")
-    creds = refresh_credentials_if_needed(session)
+    session_token = get_session_token(request)
+    creds = refresh_credentials_if_needed(session_token)
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -126,8 +126,8 @@ def last5(request: Request):
 
 @router.post("/generate-reply/{message_id}")
 def generate_reply(message_id: str, request: Request):
-    session = request.cookies.get("session")
-    creds = refresh_credentials_if_needed(session)
+    session_token = get_session_token(request)
+    creds = refresh_credentials_if_needed(session_token)
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
 

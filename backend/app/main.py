@@ -9,6 +9,7 @@ from . import db as db_module
 
 app = FastAPI(title="AI Email Assistant - Backend")
 
+
 # Allow your frontend origin(s)
 origins = [
     FRONTEND_BASE_URL,
