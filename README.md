@@ -57,8 +57,6 @@ This project is split into:
     │   └── dashboard/page.tsx
     ├── package.json
     └── .env.local           (you create)
-
----
 ```
 
 ## ✅ Prerequisites
