@@ -59,6 +59,7 @@ This project is split into:
     └── .env.local           (you create)
 
 ---
+```
 
 ## ✅ Prerequisites
 
