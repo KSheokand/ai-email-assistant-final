@@ -342,12 +342,6 @@ Production login flow is then:
 
 ---
 
-## 📝 License
-
-Add your license info here (MIT, Apache 2.0, etc.).
-
----
-
 ## 🙋‍♂️ Notes
 
 * If you see `401 Unauthorized` on `/auth/me` in production:
