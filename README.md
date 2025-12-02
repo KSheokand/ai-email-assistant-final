@@ -310,6 +310,7 @@ Production login flow is then:
    ```text
    https://your-frontend.vercel.app/dashboard
    ```
+My Deployed Vercel Link: https://ai-email-assistant-final.vercel.app/
 
 ---
 
