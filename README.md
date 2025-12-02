@@ -1,3 +1,5 @@
+Here’s a complete `README.md` you can drop into your repo and tweak if needed 👇
+
 ---
 
 ````md
@@ -360,8 +362,3 @@ Add your license info here (MIT, Apache 2.0, etc.).
 * If you see `insufficient_quota` from OpenAI, your API key is out of credits.
 
 Happy hacking! 📨🤖
-
-```
-
-You can adjust the repo URL, service URLs, and license section to match your exact setup.
-```
