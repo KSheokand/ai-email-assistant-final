@@ -20,6 +20,13 @@ type ChatMessage = {
   text: string;
 };
 
+// Read session token from localStorage and build Authorization header
+function getAuthHeaders() {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem("sessionToken");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 function shorten(text: string, max = 140) {
   if (!text) return "";
   const t = text.trim().replace(/\s+/g, " ");
@@ -54,8 +61,22 @@ export default function Dashboard() {
   >({});
 
   useEffect(() => {
+    // 1) If redirected from /auth/callback, grab ?session= from URL once
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      const sessionFromUrl = url.searchParams.get("session");
+      if (sessionFromUrl) {
+        localStorage.setItem("sessionToken", sessionFromUrl);
+        url.searchParams.delete("session");
+        window.history.replaceState(null, "", url.toString());
+      }
+    }
+
+    // 2) Call /auth/me with Authorization header + cookies
+    const headers = getAuthHeaders();
+
     axios
-      .get(`${backend}/auth/me`, { withCredentials: true })
+      .get(`${backend}/auth/me`, { withCredentials: true, headers })
       .then((res) => {
         setUserName(res.data.name || res.data.email);
         setUserPic(res.data.picture || null);
@@ -74,6 +95,7 @@ export default function Dashboard() {
         ]);
       })
       .catch(() => {
+        // If auth fails, go back to landing/login
         window.location.href = "/";
       });
   }, []);
@@ -90,8 +112,10 @@ export default function Dashboard() {
     });
 
     try {
+      const headers = getAuthHeaders();
       const res = await axios.get(`${backend}/gmail/last5`, {
         withCredentials: true,
+        headers,
       });
       const msgs: Email[] = res.data.messages || [];
       setEmails(msgs);
@@ -145,10 +169,11 @@ export default function Dashboard() {
     });
 
     try {
+      const headers = getAuthHeaders();
       const res = await axios.post(
         `${backend}/gmail/generate-reply/${email.id}`,
         {},
-        { withCredentials: true }
+        { withCredentials: true, headers }
       );
       const reply = res.data.reply as string;
       setGeneratedReplies((prev) => ({ ...prev, [email.id]: reply }));
@@ -196,10 +221,11 @@ export default function Dashboard() {
     });
 
     try {
+      const headers = getAuthHeaders();
       const res = await axios.post(
         `${backend}/gmail/send-reply/${email.id}`,
         { reply_text: reply },
-        { withCredentials: true }
+        { withCredentials: true, headers }
       );
       if (res.data.status === "sent") {
         pushMessage({
@@ -240,9 +266,10 @@ export default function Dashboard() {
     if (!email) return;
 
     try {
+      const headers = getAuthHeaders();
       const res = await axios.delete(
         `${backend}/gmail/delete/${email.id}`,
-        { withCredentials: true }
+        { withCredentials: true, headers }
       );
       if (res.data.status === "deleted") {
         pushMessage({
