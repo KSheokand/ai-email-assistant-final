@@ -1,4 +1,3 @@
-````
 # AI Email Assistant
 
 An AI-powered Gmail assistant that lets you:
@@ -58,7 +57,6 @@ This project is split into:
     │   └── dashboard/page.tsx
     ├── package.json
     └── .env.local           (you create)
-````
 
 ---
 
