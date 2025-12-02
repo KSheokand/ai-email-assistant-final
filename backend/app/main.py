@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, gmail, ai
+from .routers import auth, gmail
 from .config import FRONTEND_BASE_URL
 
 # import db to initialize on startup
@@ -27,7 +27,6 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/auth")
 app.include_router(gmail.router, prefix="/gmail")
-app.include_router(ai.router, prefix="/ai")
 
 @app.on_event("startup")
 def startup_event():

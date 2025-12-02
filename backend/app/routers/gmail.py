@@ -1,184 +1,252 @@
 # app/routers/gmail.py
+from typing import List, Dict, Any, Optional
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from email.mime.text import MIMEText
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 from googleapiclient.discovery import build
-import base64
-import email as py_email
 
-from ..auth_utils import refresh_credentials_if_needed, get_session_token
-from ..ai_service import summarize_text, generate_reply_for_email
+from ..auth_utils import get_session_token, refresh_credentials_if_needed
+from .ai import summarize_email, generate_reply
 
 router = APIRouter()
 
 
-def _gmail_service(creds):
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+def _get_gmail_service(request: Request):
+    """
+    Build an authenticated Gmail service using the session token (cookie or Authorization header).
+    """
+    session_token = get_session_token(request)
+    creds = refresh_credentials_if_needed(session_token)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Not authenticated or token invalid.")
+    service = build("gmail", "v1", credentials=creds)
+    return service, creds
 
 
-def _parse_message(msg):
-    headers = msg.get("payload", {}).get("headers", [])
-    header_map = {h["name"].lower(): h["value"] for h in headers}
-    subject = header_map.get("subject", "(no subject)")
-    sender = header_map.get("from", "")
-    snippet = msg.get("snippet", "")
+def _get_header(headers: List[Dict[str, str]], name: str) -> str:
+    for h in headers:
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+
+def _extract_body_from_message(msg: Dict[str, Any]) -> str:
+    """
+    Try to extract a readable body from a Gmail message payload.
+    Prefers text/plain, falls back to text/html (stripped) if needed.
+    """
+    payload = msg.get("payload", {})
     body = ""
 
-    payload = msg.get("payload", {})
-    if payload.get("parts"):
-        for part in payload["parts"]:
-            if part.get("mimeType") == "text/plain":
-                data = part.get("body", {}).get("data", "")
-                if data:
-                    try:
-                        body = base64.urlsafe_b64decode(data).decode("utf-8")
-                    except Exception:
-                        body = data
-                    break
-    else:
-        data = payload.get("body", {}).get("data", "")
-        if data:
+    def walk_parts(part: Dict[str, Any]) -> Optional[str]:
+        mime_type = part.get("mimeType", "")
+        data = part.get("body", {}).get("data")
+        if data and ("text/plain" in mime_type or "text/html" in mime_type):
             try:
-                body = base64.urlsafe_b64decode(data).decode("utf-8")
+                decoded = urlsafe_b64decode(data.encode("utf-8")).decode("utf-8", errors="ignore")
+                return decoded
             except Exception:
-                body = data
+                return None
 
-    return {
-        "id": msg.get("id"),
-        "threadId": msg.get("threadId"),
-        "subject": subject,
-        "from": sender,
-        "snippet": snippet,
-        "body": body,
-    }
+        for sub in part.get("parts", []) or []:
+            res = walk_parts(sub)
+            if res:
+                return res
+        return None
 
+    body = walk_parts(payload) or ""
+    return body
 
-# app/routers/gmail.py (only the last5 endpoint shown)
 
 @router.get("/last5")
 def last5(request: Request):
     """
-    Fetch and summarize the last 5 Gmail messages.
-    If OpenAI quota is exceeded, summaries will say so but emails will still appear.
+    Fetch the 5 most recent emails from the user's inbox.
+    For each email, return: id, subject, from, snippet, body, and AI summary.
     """
-    session_token = get_session_token(request)
-    creds = refresh_credentials_if_needed(session_token)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    service = _gmail_service(creds)
+    try:
+        service, creds = _get_gmail_service(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("DEBUG /gmail/last5: failed to build service", e)
+        raise HTTPException(status_code=500, detail="Failed to initialize Gmail service")
 
     try:
-        results = service.users().messages().list(
-            userId="me",
-            maxResults=5,
-        ).execute()
-        print("DEBUG /gmail/last5 list results:", results)
+        list_resp = (
+            service.users()
+            .messages()
+            .list(userId="me", labelIds=["INBOX"], maxResults=5)
+            .execute()
+        )
     except Exception as e:
         print("DEBUG /gmail/last5 list error:", e)
-        raise HTTPException(status_code=500, detail=f"gmail list error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list emails")
 
-    messages_meta = results.get("messages", [])
-    if not messages_meta:
-        print("DEBUG /gmail/last5: no messages returned from Gmail API")
-        return JSONResponse({"messages": []})
+    msgs_meta = list_resp.get("messages", []) or []
 
-    emails = []
-    for m in messages_meta:
+    results = []
+    for meta in msgs_meta:
+        msg_id = meta.get("id")
+        if not msg_id:
+            continue
+
         try:
-            full = service.users().messages().get(
-                userId="me", id=m["id"], format="full"
-            ).execute()
-            print("DEBUG /gmail/last5 full message id:", m["id"])
-
-            parsed = _parse_message(full)
-            summary_source = parsed["body"] or parsed["snippet"] or ""
-
-            # 👇 This call will now *never* raise – it returns fallback text if quota is exceeded
-            parsed["summary"] = summarize_text(summary_source)
-
-            emails.append(parsed)
-        except Exception as e:
-            print(
-                "DEBUG /gmail/last5: failed to process message",
-                m.get("id"),
-                "error:",
-                e,
+            full = (
+                service.users()
+                .messages()
+                .get(userId="me", id=msg_id, format="full")
+                .execute()
             )
-            # still append *something* so the user sees the email
-            try:
-                parsed_minimal = {
-                    "id": m.get("id"),
-                    "threadId": m.get("threadId"),
-                    "subject": "(failed to parse details)",
-                    "from": "",
-                    "snippet": "",
-                    "body": "",
-                    "summary": "Failed to parse this email.",
-                }
-                emails.append(parsed_minimal)
-            except Exception:
-                continue
+            headers = full.get("payload", {}).get("headers", [])
+            subject = _get_header(headers, "Subject") or "(no subject)"
+            from_line = _get_header(headers, "From")
+            snippet = full.get("snippet", "")
 
-    print(f"DEBUG /gmail/last5: returning {len(emails)} messages")
-    return JSONResponse({"messages": emails})
+            body_text = _extract_body_from_message(full)
+
+            # AI summary via Groq
+            try:
+                summary = summarize_email(body_text)
+            except Exception as ai_err:
+                print(f"DEBUG /gmail/last5: AI summarize failed for {msg_id}", ai_err)
+                summary = f"AI summary unavailable. Preview: {snippet[:140]}"
+
+            results.append(
+                {
+                    "id": msg_id,
+                    "subject": subject,
+                    "from": from_line,
+                    "snippet": snippet,
+                    "body": body_text,
+                    "summary": summary,
+                }
+            )
+
+        except Exception as e:
+            print(f"DEBUG /gmail/last5: failed to parse message {msg_id}", e)
+            continue
+
+    return {"messages": results}
 
 
 @router.post("/generate-reply/{message_id}")
-def generate_reply(message_id: str, request: Request):
-    session_token = get_session_token(request)
-    creds = refresh_credentials_if_needed(session_token)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    service = _gmail_service(creds)
-    full = service.users().messages().get(
-        userId="me", id=message_id, format="full"
-    ).execute()
-    parsed = _parse_message(full)
+def generate_reply_for_message(message_id: str, request: Request):
+    """
+    Generate a proposed reply (AI) for a given email message ID.
+    """
+    try:
+        service, creds = _get_gmail_service(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("DEBUG /gmail/generate-reply: failed to build service", e)
+        raise HTTPException(status_code=500, detail="Failed to initialize Gmail service")
 
     try:
-        reply = generate_reply_for_email(
-            email_body=parsed["body"] or parsed["snippet"] or "",
-            sender=parsed["from"],
-            subject=parsed["subject"],
+        full = (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute()
         )
     except Exception as e:
-        print("ERROR /gmail/generate-reply:", e)
+        print("DEBUG /gmail/generate-reply get message error:", e)
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    headers = full.get("payload", {}).get("headers", [])
+    subject = _get_header(headers, "Subject") or "(no subject)"
+    from_line = _get_header(headers, "From")
+    body_text = _extract_body_from_message(full)
+
+    # Generate reply using Groq
+    try:
+        reply_text = generate_reply(subject, from_line, body_text)
+    except Exception as e:
+        print("ERROR /gmail/generate-reply AI error:", e)
         raise HTTPException(
-            status_code=429,
-            detail="AI reply generation is temporarily unavailable (quota or model error).",
+            status_code=500,
+            detail="Failed to generate AI reply. Please try again later.",
         )
 
-    return JSONResponse({"reply": reply, "email": parsed})
-
-
-
-def _build_reply_mime(original, reply_text: str, user_email: str):
-    headers = original.get("payload", {}).get("headers", [])
-    header_map = {h["name"].lower(): h["value"] for h in headers}
-    subject = header_map.get("subject", "(no subject)")
-    sender = header_map.get("from", "")
-    to_addr = sender.split("<")[-1].replace(">", "").strip()
-
-    msg = py_email.message.EmailMessage()
-    msg["To"] = to_addr
-    msg["From"] = user_email
-    if subject.lower().startswith("re:"):
-        msg["Subject"] = subject
-    else:
-        msg["Subject"] = "Re: " + subject
-    msg["In-Reply-To"] = original.get("id")
-    msg.set_content(reply_text)
-
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
-    return {"raw": raw, "threadId": original.get("threadId")}
+    return {"reply": reply_text}
 
 
 @router.post("/send-reply/{message_id}")
-def send_reply(message_id: str, request: Request):
-    data = request.json() if hasattr(request, "json") else None
-    # FastAPI sync endpoint: request.json() is coroutine only in async view;
-    # here we assume fastapi will parse body for us via pydantic in real code.
-    # For simplicity, use body param via Request in TS frontend:
-    raise HTTPException(status_code=500, detail="Use body model instead")
+def send_reply(message_id: str, request: Request, payload: Dict[str, str]):
+    """
+    Send a reply via Gmail for a given message, using the reply text from the client.
+    """
+    reply_text = payload.get("reply_text")
+    if not reply_text:
+        raise HTTPException(status_code=400, detail="Missing reply_text")
+
+    try:
+        service, creds = _get_gmail_service(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("DEBUG /gmail/send-reply: failed to build service", e)
+        raise HTTPException(status_code=500, detail="Failed to initialize Gmail service")
+
+    try:
+        full = (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute()
+        )
+    except Exception as e:
+        print("DEBUG /gmail/send-reply get message error:", e)
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    headers = full.get("payload", {}).get("headers", [])
+    subject = _get_header(headers, "Subject") or "(no subject)"
+    from_line = _get_header(headers, "From")
+    # Extract the actual email address from From:
+    to_addr = from_line
+
+    # Build MIME message
+    mime_msg = MIMEText(reply_text)
+    mime_msg["To"] = to_addr
+    mime_msg["Subject"] = f"Re: {subject}"
+
+    raw = urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
+
+    try:
+        send_resp = (
+            service.users()
+            .messages()
+            .send(userId="me", body={"raw": raw, "threadId": full.get("threadId")})
+            .execute()
+        )
+        print("DEBUG /gmail/send-reply sent:", send_resp.get("id"))
+    except Exception as e:
+        print("DEBUG /gmail/send-reply send error:", e)
+        raise HTTPException(status_code=500, detail="Failed to send email")
+
+    return {"status": "sent"}
+
+
+@router.delete("/delete/{message_id}")
+def delete_message(message_id: str, request: Request):
+    """
+    Delete an email message from the user's inbox.
+    """
+    try:
+        service, creds = _get_gmail_service(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("DEBUG /gmail/delete: failed to build service", e)
+        raise HTTPException(status_code=500, detail="Failed to initialize Gmail service")
+
+    try:
+        service.users().messages().delete(userId="me", id=message_id).execute()
+    except Exception as e:
+        print("DEBUG /gmail/delete error:", e)
+        raise HTTPException(status_code=500, detail="Failed to delete email")
+
+    return {"status": "deleted"}

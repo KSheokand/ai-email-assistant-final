@@ -13,6 +13,7 @@ JWT_SECRET = os.getenv("JWT_SECRET", "dev_jwt_secret")
 JWT_ALG = os.getenv("JWT_ALGORITHM", "HS256")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # DATABASE_URL is required for Postgres token store. Example:
 # postgresql://user:pass@host:5432/dbname
