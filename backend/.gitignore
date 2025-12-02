@@ -1,0 +1,45 @@
+# -------- Python --------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dylib
+
+# -------- Virtual Environment --------
+.venv/
+env/
+venv/
+ENV/
+
+# -------- Environment Variables --------
+.env
+.env.*
+!.env.example
+
+# -------- Editor / OS files --------
+*.swp
+*.swo
+*.DS_Store
+Thumbs.db
+
+# -------- Token Store (DO NOT COMMIT) --------
+token_store.json
+
+# -------- Logs --------
+*.log
+logs/
+debug.log
+
+# -------- Python Packaging --------
+*.egg
+*.egg-info/
+dist/
+build/
+
+# -------- Cache --------
+.cache/
+.pytest_cache/
+
+# -------- Render Deploy Artifacts (if generated) --------
+.render/
