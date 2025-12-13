@@ -11,7 +11,7 @@ An AI-powered Gmail assistant that lets you:
 
 This project is split into:
 
-- **Backend** – FastAPI + Gmail API + OpenAI + PostgreSQL
+- **Backend** – FastAPI + Gmail API + GroqAI + PostgreSQL
 - **Frontend** – Next.js (App Router) + Tailwind CSS
 
 ---
